@@ -31,6 +31,17 @@ def add_gaussian_shifts(depth, std=1/2.0):
 
 def filterDisp(disp, dot_pattern_, invalid_disp_):
 
+    # Get the size of the dot pattern
+    r1, c1 = disp.shape
+
+    # Get a repeated version of the dot pattern
+    num_repeats_row = r1 // dot_pattern_.shape[0] + (r1 % dot_pattern_.shape[0] > 0)
+    num_repeats_col = c1 // dot_pattern_.shape[1] + (c1 % dot_pattern_.shape[1] > 0)
+
+    repeated_dot_pattern = np.tile(dot_pattern_, (num_repeats_row, num_repeats_col))
+    dot_pattern_ = repeated_dot_pattern[0:r1, 0:c1]
+
+
     size_filt_ = 9
 
     xx = np.linspace(0, size_filt_-1, size_filt_)
@@ -116,22 +127,25 @@ if __name__ == "__main__":
     # reading the image directly in gray with 0 as input 
     dot_pattern_ = cv2.imread("./data/kinect-pattern_3x3.png", 0)
 
-    count = 181
+    count = 0
 
     # various variables to handle the noise modelling
     scale_factor  = 100     # converting depth from m to cm 
-    focal_length  = 480.0   # focal length of the camera used 
+    focal_length  = 725.0087 # 480.0   # focal length of the camera used 
     baseline_m    = 0.075   # baseline in m 
     invalid_disp_ = 99999999.9
 
-    while count < 190:
+    max_depth = 400.0
 
-        depth_uint16 = cv2.imread("depth/{}.png".format(count), cv2.IMREAD_UNCHANGED)
+    while count < 447:
+        # Set a string for the image sequence number. The number contains 5 digits, 0-padded.
+        count_str = str(count).zfill(5)
+
+        depth_uint16 = cv2.imread("/home/clarence/ros_ws/semantic_dsp_ws/src/Semantic_DSP_Map/data/VirtualKitti2/depth/Camera_0/depth_"+count_str+".png", cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)
         h, w = depth_uint16.shape 
 
-        # Our depth images were scaled by 5000 to store in png format so dividing to get 
         # depth in meters 
-        depth = depth_uint16.astype('float') / 5000.0
+        depth = depth_uint16.astype('float') / 100.0
 
         depth_interp = add_gaussian_shifts(depth)
 
@@ -141,6 +155,9 @@ if __name__ == "__main__":
         out_disp = filterDisp(depth_f, dot_pattern_, invalid_disp_)
 
         depth = focal_length * baseline_m / out_disp
+
+        # Let depth larger than max_depth meters be invalid.
+        depth[out_disp > max_depth] = 0
         depth[out_disp == invalid_disp_] = 0 
         
         # Axial noise model.
@@ -151,7 +168,7 @@ if __name__ == "__main__":
         
         # noisy_depth = (35130/np.round((35130/np.round(depth*scale_factor)) + np.random.normal(size=(h, w))*(1.0/6.0) + 0.5))/scale_factor 
         
-        
+
         # Option 2: Emperrical noise model from Nguyen et al. 2012
         # Calculate standard deviation map. Each pixel has a different standard deviation. The standard deviation is 0.0012+0.0019*(depth-0.4)^2
 
@@ -160,27 +177,33 @@ if __name__ == "__main__":
         noise = np.random.normal(0, 1, depth.shape)
         scaled_noise = std_dev * noise
 
-        # Create a mask where depth is greater than 0.4
-        mask = depth > 0.4
+        # Create a mask where depth is greater than 0.4 and less than 600 meters.
+        mask = np.logical_and(depth > 0.4, depth < max_depth)
         # Apply noise only to locations where depth is greater than 0.4
         noisy_depth = np.where(mask, depth + scaled_noise, depth)
 
 
-        noisy_depth = noisy_depth * 5000.0 
+        noisy_depth = noisy_depth * 100.0 
         noisy_depth = noisy_depth.astype('uint16')
+
+        # Let the depth greater than max_depth_int be 65535.
+        max_depth_int = int(max_depth * 100.0)
+        noisy_depth[noisy_depth > max_depth_int] = 65535
 
         # Displaying side by side the orignal depth map and the noisy depth map with barron noise cvpr 2013 model
         cv2.namedWindow('Adding Kinect Noise', cv2.WINDOW_AUTOSIZE)
         # cv2.imshow('Adding Kinect Noise', np.hstack((depth_uint16, noisy_depth)))
-        cv2.imshow('Adding Kinect Noise', np.hstack((depth_uint16, noisy_depth)))
-        key = cv2.waitKey(1)
+        cv2.imshow('Adding Kinect Noise', np.vstack((depth_uint16, noisy_depth)))
+        key = cv2.waitKey(100)
 
         # Press esc or 'q' to close the image window
         if key & 0xFF == ord('q') or key == 27:
             cv2.destroyAllWindows()
             break
 
-        depth2save = np.hstack((depth_uint16, noisy_depth))
-        cv2.imwrite('depth_noised_{}.png'.format(count), depth2save)
+        
+        out_img_name = "/home/clarence/ros_ws/semantic_dsp_ws/src/Semantic_DSP_Map/data/VirtualKitti2/depth/Camera_0_noised/depth_" + count_str + ".png"
+        cv2.imwrite(out_img_name, noisy_depth)
+
         print(count)
         count = count + 1
