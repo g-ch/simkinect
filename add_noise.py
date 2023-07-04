@@ -143,9 +143,28 @@ if __name__ == "__main__":
         depth = focal_length * baseline_m / out_disp
         depth[out_disp == invalid_disp_] = 0 
         
+        # Axial noise model.
+        
+        # Option 1: Barron et al. 2013
         # The depth here needs to converted to cms so scale factor is introduced 
         # though often this can be tuned from [100, 200] to get the desired banding / quantisation effects 
-        noisy_depth = (35130/np.round((35130/np.round(depth*scale_factor)) + np.random.normal(size=(h, w))*(1.0/6.0) + 0.5))/scale_factor 
+        
+        # noisy_depth = (35130/np.round((35130/np.round(depth*scale_factor)) + np.random.normal(size=(h, w))*(1.0/6.0) + 0.5))/scale_factor 
+        
+        
+        # Option 2: Emperrical noise model from Nguyen et al. 2012
+        # Calculate standard deviation map. Each pixel has a different standard deviation. The standard deviation is 0.0012+0.0019*(depth-0.4)^2
+
+        std_dev = 0.0012 + 0.0019 * (depth - 0.4)**2
+
+        noise = np.random.normal(0, 1, depth.shape)
+        scaled_noise = std_dev * noise
+
+        # Create a mask where depth is greater than 0.4
+        mask = depth > 0.4
+        # Apply noise only to locations where depth is greater than 0.4
+        noisy_depth = np.where(mask, depth + scaled_noise, depth)
+
 
         noisy_depth = noisy_depth * 5000.0 
         noisy_depth = noisy_depth.astype('uint16')
